@@ -5,14 +5,18 @@ mod display;
 
 use crate::display::DisplayFrame;
 use cortex_m::peripheral::NVIC;
+use defmt::info;
 use defmt_rtt as _;
 use efm32xg_hal::{
-    cmu::{Cmu, HfClockSource, LfClockSource},
+    acmp::{self, Acmp},
+    cmu::{Cmu, HfClockPrescaler, HfClockSource, LfClockSource},
     dma::Dma,
-    gpio::{dynamic::DynamicPin, efemb::AsyncInputPin, OutPp, Pin},
-    pac::Interrupt,
+    gpio::{dynamic::DynamicPin, efemb::AsyncInputPin, Analog, OutPp, Pin},
+    pac::{prs::vals::ChCtrlEdsel, Interrupt},
     peripherals::Usart0,
     prelude::*,
+    prs::{self, Prs, PrsChannelId},
+    timer::{self, Timer, TimerConfig},
     timer_le::efemb::Ticker,
     usart::spi::{BitOrder, Config, SpiParts},
 };
@@ -21,7 +25,7 @@ use embassy_sync::{
     blocking_mutex::raw::ThreadModeRawMutex,
     channel::{Channel, Receiver, Sender},
 };
-use embassy_time::Timer;
+use embassy_time::Timer as EmbTimer;
 use embedded_hal::spi::MODE_0;
 use embedded_hal_async::digital::Wait;
 use panic_probe as _;
@@ -71,6 +75,7 @@ async fn main(spawner: Spawner) {
 
     let gpio = Gpio::new(p.Gpio);
     let dma = Dma::init(p.Ldma);
+    let prs_channels = Prs::new(p.Prs).split();
 
     // Enable NVIC for GPIO interrupts
     unsafe {
@@ -80,6 +85,16 @@ async fn main(spawner: Spawner) {
 
     // Let this App take control of display (this is a `UG154: EFM32 Pearl Gecko Starter Kit` paticularity)
     let _ = gpio.pd15.into_mode::<OutPp>().set_high();
+
+    // Configure capacitive sense pins as analog inputs for ACMP
+    let _ = gpio.pb11.into_mode::<Analog>();
+    let _ = gpio.pb12.into_mode::<Analog>();
+
+    // ---- Capacitive buttons Task ----
+    spawner.spawn(
+        capacitive_task(p.Timer0, p.Timer1, p.Acmp0, prs_channels.ch0)
+            .expect("Could not spawn Capacitive Task"),
+    );
 
     // Add `DisplayFrame`s to the display task queue
     for f in display::ls013b7dh03::take_display_frames() {
@@ -138,6 +153,166 @@ async fn main(spawner: Spawner) {
     );
 }
 
+#[task]
+async fn capacitive_task(
+    p_timer0: efm32xg_hal::Peri<'static, efm32xg_hal::peripherals::Timer0>,
+    p_timer1: efm32xg_hal::Peri<'static, efm32xg_hal::peripherals::Timer1>,
+    p_acmp: efm32xg_hal::Peri<'static, efm32xg_hal::peripherals::Acmp0>,
+    mut prs_ch0: prs::PrsChannel<0>,
+) {
+    // Configure PRS channel 0 to detect ACMP0 output edges
+    prs_ch0.set_source(prs::PrsChSource::Acmp0);
+    prs_ch0.set_edge(ChCtrlEdsel::Posedge);
+
+    // Configure TIMER0 as measurement window timer
+    // HFPERCLK = 40MHz, prescaler = Div512, so timer clock = 40MHz / 512 = 78125 Hz
+    // TOP = 10, so measurement window = (10+1) / 78125 = 140.8us
+    let mut window_timer = Timer::new(
+        p_timer0,
+        TimerConfig {
+            clock: timer::Clksel::Preschfperclk,
+            presc: timer::Presc::Div512,
+            top: 10,
+            ..Default::default()
+        },
+    );
+
+    // Configure TIMER1 to count ACMP pulses via CC1+PRS
+    let mut count_timer = Timer::new(
+        p_timer1,
+        TimerConfig {
+            // synchronize the start&stop to Timer0 start&stop
+            synchronized: true,
+            // Clock source is CC1 (PRS pulses from ACMP)
+            clock: timer::Clksel::Cc1,
+            // Channel 1 takes clock input from Acmp via Prs channel 0
+            channels: timer::ChannelCofigs::default().with_cc_config(
+                timer::TimerChannelId::Ch1,
+                timer::CcConfig {
+                    mode: timer::CcCtrlMode::Inputcapture,
+                    input_sel: timer::CcInputSel::Prs(PrsChannelId::Ch0),
+                    ic_edge_select: timer::CcCtrlIcedge::Both,
+                    ic_event_control: timer::CcCtrlIcevctrl::Rising,
+                },
+            ),
+            ..Default::default()
+        },
+    );
+
+    // Configure ACMP0 for CAPACITIVE SENSE MODE
+    let mut acmp = Acmp::new(
+        p_acmp,
+        acmp::Config {
+            bias_prog: acmp::BiasProg::try_from_u8(0x20).unwrap(),
+            accuracy: acmp::Accuracy::High,
+            hist_0: acmp::Hysteresis {
+                div_va: acmp::DivV::try_from_u8(0x30).unwrap(),
+                hyst: acmp::Hyst::Hyst8,
+                ..Default::default()
+            },
+            hist_1: acmp::Hysteresis {
+                div_va: acmp::DivV::try_from_u8(0x10).unwrap(),
+                hyst: acmp::Hyst::Hyst8,
+                ..Default::default()
+            },
+            input_sel: acmp::InputSelection {
+                cs_res_sel: Some(acmp::CsResSel::Res5),
+                va_sel: acmp::VaSel::Vdd,
+                vb_sel: acmp::VbSel::V1p25,
+                vlp_sel: acmp::VlpSel::VaDiv,
+                neg_sel: acmp::InputSelect::VaDiv,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    );
+
+    const ACMP_CHANNEL_COUNT: usize = 2;
+    let acmp_channels: [acmp::InputSelect; ACMP_CHANNEL_COUNT] = [
+        acmp::InputSelect::Aport4XCh27,
+        acmp::InputSelect::Aport3XCh28,
+    ];
+    let mut count: [_; ACMP_CHANNEL_COUNT] = Default::default();
+    // Track maximum counts for calibration
+    let mut max_count: [u16; ACMP_CHANNEL_COUNT] = Default::default();
+    let mut threshold: [u16; ACMP_CHANNEL_COUNT] = Default::default();
+    let mut pressed: [bool; ACMP_CHANNEL_COUNT] = Default::default();
+
+    // Extended warm-up period: take many measurements without updating max
+    // This ensures ACMP oscillator stabilizes before calibration
+    let warmup_cycles = 30;
+    let mut warmup_count = 0;
+
+    // Initial stabilization delay
+    EmbTimer::after_millis(200).await;
+
+    loop {
+        // Enable ACMP for the entire measurement cycle
+        acmp.set_enabled(true);
+        // Allow ACMP oscillator to stabilize - CRITICAL
+        EmbTimer::after_micros(1000).await;
+
+        for (index, ch) in acmp_channels.iter().enumerate() {
+            acmp.set_input_pos(*ch);
+            // Brief settle after channel switch
+            EmbTimer::after_micros(200).await;
+            // Reset timers
+            window_timer.set_count(0);
+            count_timer.set_count(0);
+            window_timer.clear_overflow_flag();
+
+            // Start measurement - count_timer starts&stops automatically via SYNC
+            window_timer.start();
+            // FIXME: Blocking wait for TIMER0 overflow
+            window_timer.wait_for_overflow();
+            window_timer.stop();
+
+            count[index] = count_timer.count();
+        }
+
+        // Disable ACMP after all measurements (like C code)
+        acmp.set_enabled(false);
+
+        // Process touch
+        for index in 0..ACMP_CHANNEL_COUNT {
+            // Update maximum for calibration (skip during warmup)
+            if warmup_count >= warmup_cycles {
+                if count[index] > max_count[index] {
+                    max_count[index] = count[index]
+                }
+            } else {
+                warmup_count += 1;
+            }
+
+            // Simple touch detection: count drops below 75% of maximum (25% below = touched)
+            // threshold = max - (max >> 2)
+            threshold[index] = if max_count[index] > 0 {
+                max_count[index] - (max_count[index] >> 2)
+            } else {
+                0
+            };
+
+            pressed[index] = count[index] < threshold[index] && max_count[index] > 0;
+        }
+
+        info!(
+            "PB11={} ({}) PB12={} ({}) | Max: {} {} | W: {}/{} | T: {} {}",
+            count[0],
+            threshold[0],
+            count[1],
+            threshold[1],
+            max_count[0],
+            max_count[1],
+            warmup_count,
+            warmup_cycles,
+            pressed[0],
+            pressed[1]
+        );
+
+        EmbTimer::after_millis(50).await; // Fast reporting
+    }
+}
+
 #[task(pool_size = 2)]
 async fn button_led_task(btn_id: ButtonId, mut btn: AsyncInputPin, mut led: DynamicPin) {
     loop {
@@ -147,7 +322,7 @@ async fn button_led_task(btn_id: ButtonId, mut btn: AsyncInputPin, mut led: Dyna
         defmt::info!("{} pressed", &btn_id);
 
         // Small delay to debounce
-        Timer::after_millis(50).await;
+        EmbTimer::after_millis(50).await;
 
         // Wait for button release
         let _ = btn.wait_for_high().await;
@@ -155,7 +330,7 @@ async fn button_led_task(btn_id: ButtonId, mut btn: AsyncInputPin, mut led: Dyna
         defmt::info!("{} released", &btn_id);
 
         // Small delay to debounce
-        Timer::after_millis(50).await;
+        EmbTimer::after_millis(50).await;
     }
 }
 
