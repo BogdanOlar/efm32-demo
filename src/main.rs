@@ -236,12 +236,7 @@ async fn capacitive_task(
     // Track maximum counts for calibration
     let mut max_count: [u16; ACMP_CHANNEL_COUNT] = Default::default();
     let mut threshold: [u16; ACMP_CHANNEL_COUNT] = Default::default();
-    let mut pressed: [bool; ACMP_CHANNEL_COUNT] = Default::default();
-
-    // Extended warm-up period: take many measurements without updating max
-    // This ensures ACMP oscillator stabilizes before calibration
-    let warmup_cycles = 30;
-    let mut warmup_count = 0;
+    let mut touch: [bool; ACMP_CHANNEL_COUNT] = Default::default();
 
     // Initial stabilization delay
     EmbTimer::after_millis(200).await;
@@ -270,46 +265,33 @@ async fn capacitive_task(
             count[index] = count_timer.count();
         }
 
-        // Disable ACMP after all measurements (like C code)
         acmp.set_enabled(false);
 
         // Process touch
         for index in 0..ACMP_CHANNEL_COUNT {
             // Update maximum for calibration (skip during warmup)
-            if warmup_count >= warmup_cycles {
-                if count[index] > max_count[index] {
-                    max_count[index] = count[index]
-                }
-            } else {
-                warmup_count += 1;
-            }
+            max_count[index] = max_count[index].max(count[index]);
 
             // Simple touch detection: count drops below 75% of maximum (25% below = touched)
             // threshold = max - (max >> 2)
-            threshold[index] = if max_count[index] > 0 {
-                max_count[index] - (max_count[index] >> 2)
-            } else {
-                0
-            };
+            threshold[index] = max_count[index].saturating_sub(max_count[index] >> 2);
 
-            pressed[index] = count[index] < threshold[index] && max_count[index] > 0;
+            touch[index] = count[index] < threshold[index] && max_count[index] > 0;
         }
 
         info!(
-            "PB11={} ({}) PB12={} ({}) | Max: {} {} | W: {}/{} | T: {} {}",
+            "PB11={} ({}) PB12={} ({}) | Max: {} {} | T: {} {}",
             count[0],
             threshold[0],
             count[1],
             threshold[1],
             max_count[0],
             max_count[1],
-            warmup_count,
-            warmup_cycles,
-            pressed[0],
-            pressed[1]
+            touch[0],
+            touch[1]
         );
 
-        EmbTimer::after_millis(50).await; // Fast reporting
+        EmbTimer::after_millis(50).await;
     }
 }
 
