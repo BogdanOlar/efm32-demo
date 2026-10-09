@@ -177,7 +177,7 @@ async fn capacitive_task(
         },
     );
 
-    // Configure TIMER1 to count ACMP pulses via CC1+PRS
+    // Configure TIMER1 to count ACMP pulses via CC1+PRS, and synchronize Start/Stop to Timer0 Start/Stop
     let mut count_timer = Timer::new(
         p_timer1,
         TimerConfig {
@@ -216,7 +216,7 @@ async fn capacitive_task(
                 ..Default::default()
             },
             input_sel: acmp::InputSelection {
-                cs_res_sel: Some(acmp::CsResSel::Res5),
+                cs_res_sel: Some(acmp::CsResSel::Res7),
                 va_sel: acmp::VaSel::Vdd,
                 vb_sel: acmp::VbSel::V1p25,
                 vlp_sel: acmp::VlpSel::VaDiv,
