@@ -238,14 +238,9 @@ async fn capacitive_task(
     let mut threshold: [u16; ACMP_CHANNEL_COUNT] = Default::default();
     let mut touch: [bool; ACMP_CHANNEL_COUNT] = Default::default();
 
-    // Initial stabilization delay
-    EmbTimer::after_millis(200).await;
-
     loop {
         // Enable ACMP for the entire measurement cycle
         acmp.set_enabled(true);
-        // Allow ACMP oscillator to stabilize - CRITICAL
-        EmbTimer::after_micros(1000).await;
 
         for (index, ch) in acmp_channels.iter().enumerate() {
             acmp.set_input_pos(*ch);
@@ -269,13 +264,13 @@ async fn capacitive_task(
 
         // Process touch
         for index in 0..ACMP_CHANNEL_COUNT {
-            // Update maximum for calibration (skip during warmup)
+            // Update maximum for calibration
             max_count[index] = max_count[index].max(count[index]);
 
             // Simple touch detection: count drops below 75% of maximum (25% below = touched)
-            // threshold = max - (max >> 2)
-            threshold[index] = max_count[index].saturating_sub(max_count[index] >> 2);
+            threshold[index] = max_count[index].saturating_sub(max_count[index] / 4);
 
+            // Calculate pressed state
             touch[index] = count[index] < threshold[index] && max_count[index] > 0;
         }
 
