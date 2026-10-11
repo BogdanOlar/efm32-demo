@@ -12,11 +12,11 @@ use efm32xg_hal::{
     cmu::{Cmu, HfClockPrescaler, HfClockSource, LfClockSource},
     dma::Dma,
     gpio::{dynamic::DynamicPin, efemb::AsyncInputPin, Analog, OutPp, Pin},
-    pac::{prs::vals::ChCtrlEdsel, Interrupt},
+    pac::Interrupt,
     peripherals::Usart0,
     prelude::*,
-    prs::{self, Prs, PrsChannelId},
-    timer::{self, Timer, TimerConfig},
+    prs::{self, Prs},
+    timer::{self, Timer},
     timer_le::efemb::Ticker,
     usart::spi::{BitOrder, Config, SpiParts},
 };
@@ -158,18 +158,18 @@ async fn capacitive_task(
     p_timer0: efm32xg_hal::Peri<'static, efm32xg_hal::peripherals::Timer0>,
     p_timer1: efm32xg_hal::Peri<'static, efm32xg_hal::peripherals::Timer1>,
     p_acmp: efm32xg_hal::Peri<'static, efm32xg_hal::peripherals::Acmp0>,
-    mut prs_ch0: prs::PrsChannel<0>,
+    mut prs_ch0: prs::Channel<0>,
 ) {
     // Configure PRS channel 0 to detect ACMP0 output edges
-    prs_ch0.set_source(prs::PrsChSource::Acmp0);
-    prs_ch0.set_edge(ChCtrlEdsel::Posedge);
+    prs_ch0.set_source(prs::ChSource::Acmp0);
+    prs_ch0.set_edge(prs::ChCtrlEdsel::Posedge);
 
     // Configure TIMER0 as measurement window timer
     // HFPERCLK = 40MHz, prescaler = Div512, so timer clock = 40MHz / 512 = 78125 Hz
     // TOP = 10, so measurement window = (10+1) / 78125 = 140.8us
     let mut window_timer = Timer::new(
         p_timer0,
-        TimerConfig {
+        timer::Config {
             clock: timer::Clksel::Preschfperclk,
             presc: timer::Presc::Div512,
             top: 10,
@@ -180,17 +180,17 @@ async fn capacitive_task(
     // Configure TIMER1 to count ACMP pulses via CC1+PRS, and synchronize Start/Stop to Timer0 Start/Stop
     let mut count_timer = Timer::new(
         p_timer1,
-        TimerConfig {
+        timer::Config {
             // synchronize the start&stop to Timer0 start&stop
             synchronized: true,
             // Clock source is CC1 (PRS pulses from ACMP)
             clock: timer::Clksel::Cc1,
             // Channel 1 takes clock input from Acmp via Prs channel 0
             channels: timer::ChannelCofigs::default().with_cc_config(
-                timer::TimerChannelId::Ch1,
+                timer::ChannelId::Ch1,
                 timer::CcConfig {
                     mode: timer::CcCtrlMode::Inputcapture,
-                    input_sel: timer::CcInputSel::Prs(PrsChannelId::Ch0),
+                    input_sel: timer::CcInputSel::Prs(prs::ChannelId::Ch0),
                     ic_edge_select: timer::CcCtrlIcedge::Both,
                     ic_event_control: timer::CcCtrlIcevctrl::Rising,
                 },
@@ -242,8 +242,8 @@ async fn capacitive_task(
         // Enable ACMP for the entire measurement cycle
         acmp.set_enabled(true);
 
-        for (index, ch) in acmp_channels.iter().enumerate() {
-            acmp.set_input_pos(*ch);
+        for (index, acmp_channel) in acmp_channels.iter().enumerate() {
+            acmp.set_input_pos(*acmp_channel);
             // Brief settle after channel switch
             EmbTimer::after_micros(200).await;
             // Reset timers
@@ -258,21 +258,16 @@ async fn capacitive_task(
             window_timer.stop();
 
             count[index] = count_timer.count();
-        }
 
-        acmp.set_enabled(false);
-
-        // Process touch
-        for index in 0..ACMP_CHANNEL_COUNT {
             // Update maximum for calibration
             max_count[index] = max_count[index].max(count[index]);
-
             // Simple touch detection: count drops below 75% of maximum (25% below = touched)
             threshold[index] = max_count[index].saturating_sub(max_count[index] / 4);
-
             // Calculate pressed state
             touch[index] = count[index] < threshold[index] && max_count[index] > 0;
         }
+
+        acmp.set_enabled(false);
 
         info!(
             "PB11={} ({}) PB12={} ({}) | Max: {} {} | T: {} {}",
