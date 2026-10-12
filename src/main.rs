@@ -81,6 +81,7 @@ async fn main(spawner: Spawner) {
     unsafe {
         NVIC::unmask(Interrupt::GPIO_EVEN);
         NVIC::unmask(Interrupt::GPIO_ODD);
+        NVIC::unmask(Interrupt::TIMER0);
     }
 
     // Let this App take control of display (this is a `UG154: EFM32 Pearl Gecko Starter Kit` paticularity)
@@ -160,6 +161,7 @@ async fn capacitive_task(
     p_acmp: efm32xg_hal::Peri<'static, efm32xg_hal::peripherals::Acmp0>,
     mut prs_ch0: prs::Channel<0>,
 ) {
+    defmt::info!("Starting Capacitive Touch task...");
     // Configure PRS channel 0 to detect ACMP0 output edges
     prs_ch0.set_source(prs::ChSource::Acmp0);
     prs_ch0.set_edge(prs::ChCtrlEdsel::Posedge);
@@ -173,6 +175,17 @@ async fn capacitive_task(
             clock: timer::Clksel::Preschfperclk,
             presc: timer::Presc::Div512,
             top: 10,
+            interrupts: timer::InterruptConfig {
+                flags: timer::Interrupts::new(timer::Interrupt::Overflow),
+                handler: Some(|regs| {
+                    // clear interrupt flags
+                    regs.ifc().write_value(efm32xg_hal::pac::timer::regs::Ifs(
+                        timer::Interrupts::ALL.as_inner(),
+                    ));
+                    // stop the timer
+                    regs.cmd().write(|w| w.set_stop(true));
+                }),
+            },
             ..Default::default()
         },
     );
@@ -249,13 +262,11 @@ async fn capacitive_task(
             // Reset timers
             window_timer.set_count(0);
             count_timer.set_count(0);
-            window_timer.clear_overflow_flag();
 
-            // Start measurement - count_timer starts&stops automatically via SYNC
+            // Start measurement - count_timer starts&stops automatically via SYNC,
+            // window_timer stops on interrupt
             window_timer.start();
-            // FIXME: Blocking wait for TIMER0 overflow
-            window_timer.wait_for_overflow();
-            window_timer.stop();
+            window_timer.interrupt().await;
 
             count[index] = count_timer.count();
 
@@ -287,6 +298,7 @@ async fn capacitive_task(
 
 #[task(pool_size = 2)]
 async fn button_led_task(btn_id: ButtonId, mut btn: AsyncInputPin, mut led: DynamicPin) {
+    defmt::info!("Starting Button {} task...", &btn_id);
     loop {
         // Wait for button press (active low)
         let _ = btn.wait_for_low().await;
@@ -314,12 +326,12 @@ async fn lcd_task(
     cs: Pin<'D', 14, OutPp>,
     disp_com_inv: Pin<'D', 13, OutPp>,
 ) {
-    defmt::info!("Started SPI task...");
+    defmt::info!("Starting SPI task...");
     display::ls013b7dh03::lcd_task(frames_in, frames_out, spi, cs, disp_com_inv).await;
 }
 
 #[task]
 async fn display_task(frames_in: DisplayFrameChReceiver, frames_out: DisplayFrameChSender) {
-    defmt::info!("Started Display task...");
+    defmt::info!("Starting Display task...");
     display::display_task(frames_in, frames_out).await;
 }
