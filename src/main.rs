@@ -177,14 +177,7 @@ async fn capacitive_task(
             top: 10,
             interrupts: timer::InterruptConfig {
                 flags: timer::Interrupts::new(timer::Interrupt::Overflow),
-                handler: Some(|regs| {
-                    // clear interrupt flags
-                    regs.ifc().write_value(efm32xg_hal::pac::timer::regs::Ifs(
-                        timer::Interrupts::ALL.as_inner(),
-                    ));
-                    // stop the timer
-                    regs.cmd().write(|w| w.set_stop(true));
-                }),
+                ..Default::default()
             },
             ..Default::default()
         },
@@ -263,10 +256,10 @@ async fn capacitive_task(
             window_timer.set_count(0);
             count_timer.set_count(0);
 
-            // Start measurement - count_timer starts&stops automatically via SYNC,
-            // window_timer stops on interrupt
+            // Start measurement - count_timer starts&stops automatically via SYNC
             window_timer.start();
             window_timer.interrupt().await;
+            window_timer.stop();
 
             count[index] = count_timer.count();
 
