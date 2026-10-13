@@ -13,6 +13,6 @@ pub enum ButtonId {
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum ButtonEvent {
-    Released,
-    Pressed,
+    Released(ButtonId),
+    Pressed(ButtonId),
 }

@@ -1,6 +1,6 @@
 //! LS013B7DH03 display
 
-use crate::{display::DisplayFrame, DisplayFrameChReceiver, DisplayFrameChSender};
+use crate::display::{DisplayFrame, DisplayFrameChReceiver, DisplayFrameChSender};
 use core::{
     cell::UnsafeCell,
     sync::atomic::{AtomicBool, Ordering},

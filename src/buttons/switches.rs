@@ -1,6 +1,6 @@
 //! Buttons usin HW switches
 
-use crate::ButtonId;
+use crate::buttons::ButtonId;
 use efm32xg_hal::gpio::{dynamic::DynamicPin, efemb::AsyncInputPin};
 use embassy_time::Timer;
 use embedded_hal::digital::OutputPin;

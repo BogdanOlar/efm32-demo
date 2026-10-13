@@ -4,12 +4,10 @@
 mod buttons;
 mod display;
 
-use crate::{buttons::ButtonId, display::DisplayFrame};
 use cortex_m::peripheral::NVIC;
 use defmt::info;
 use defmt_rtt as _;
 use efm32xg_hal::{
-    acmp::{self, Acmp},
     cmu::{Cmu, HfClockPrescaler, HfClockSource, LfClockSource},
     dma::Dma,
     gpio::{dynamic::DynamicPin, efemb::AsyncInputPin, Analog, OutPp, Pin},
@@ -17,42 +15,12 @@ use efm32xg_hal::{
     peripherals::Usart0,
     prelude::*,
     prs::{self, Prs},
-    timer::{self, Timer},
     timer_le::efemb::Ticker,
     usart::spi::{BitOrder, Config, SpiParts},
 };
 use embassy_executor::{task, Spawner};
-use embassy_sync::{
-    blocking_mutex::raw::ThreadModeRawMutex,
-    channel::{Channel, Receiver, Sender},
-};
-use embassy_time::Timer as EmbTimer;
 use embedded_hal::spi::MODE_0;
-use embedded_hal_async::digital::Wait;
 use panic_probe as _;
-
-const MAX_DISPLAY_BUFFER_COUNT: usize = 2;
-
-type DisplayFrameCh = Channel<
-    ThreadModeRawMutex,
-    DisplayFrame<'static, { display::ls013b7dh03::BUF_SIZE }>,
-    MAX_DISPLAY_BUFFER_COUNT,
->;
-type DisplayFrameChReceiver = Receiver<
-    'static,
-    ThreadModeRawMutex,
-    DisplayFrame<'static, { display::ls013b7dh03::BUF_SIZE }>,
-    MAX_DISPLAY_BUFFER_COUNT,
->;
-type DisplayFrameChSender = Sender<
-    'static,
-    ThreadModeRawMutex,
-    DisplayFrame<'static, { display::ls013b7dh03::BUF_SIZE }>,
-    MAX_DISPLAY_BUFFER_COUNT,
->;
-
-static TO_SPI: DisplayFrameCh = Channel::new();
-static FROM_SPI: DisplayFrameCh = Channel::new();
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
@@ -94,13 +62,13 @@ async fn main(spawner: Spawner) {
 
     // Add `DisplayFrame`s to the display task queue
     for f in display::ls013b7dh03::take_display_frames() {
-        FROM_SPI.sender().send(f).await;
+        display::FROM_SPI.sender().send(f).await;
     }
 
     // ---- LED 0 and Button 0 Task ----
     spawner.spawn(
         button_led_task(
-            ButtonId::Btn0,
+            buttons::ButtonId::Btn0,
             gpio.pf6
                 .into_mode::<InFloat>()
                 .into_async_input(gpio.exti4ctrl),
@@ -112,7 +80,7 @@ async fn main(spawner: Spawner) {
     // ---- LED 1 and Button 1 Task ----
     spawner.spawn(
         button_led_task(
-            ButtonId::Btn1,
+            buttons::ButtonId::Btn1,
             gpio.pf7
                 .into_mode::<InFilt>()
                 .into_async_input(gpio.exti5ctrl),
@@ -124,8 +92,8 @@ async fn main(spawner: Spawner) {
     // ---- LCD SPI Task ----
     spawner.spawn(
         lcd_task(
-            TO_SPI.receiver(),
-            FROM_SPI.sender(),
+            display::TO_SPI.receiver(),
+            display::FROM_SPI.sender(),
             Spi::new(
                 SpiParts::new(
                     p.Usart0,
@@ -145,7 +113,8 @@ async fn main(spawner: Spawner) {
 
     // ---- Display Task ----
     spawner.spawn(
-        display_task(FROM_SPI.receiver(), TO_SPI.sender()).expect("Could not spawn Display task"),
+        display_task(display::FROM_SPI.receiver(), display::TO_SPI.sender())
+            .expect("Could not spawn Display task"),
     );
 }
 
@@ -156,30 +125,33 @@ async fn capacitive_task(
     p_acmp: efm32xg_hal::Peri<'static, efm32xg_hal::peripherals::Acmp0>,
     prs_ch0: prs::Channel<0>,
 ) {
-    defmt::info!("Starting Capacitive Touch task...");
+    info!("Starting Capacitive Touch task...");
     buttons::capacitive::capacitive_task(p_timer0, p_timer1, p_acmp, prs_ch0).await
 }
 
 #[task(pool_size = 2)]
-async fn button_led_task(btn_id: ButtonId, btn: AsyncInputPin, led: DynamicPin) {
-    defmt::info!("Starting Button {} task...", &btn_id);
+async fn button_led_task(btn_id: buttons::ButtonId, btn: AsyncInputPin, led: DynamicPin) {
+    info!("Starting Button {} task...", &btn_id);
     buttons::switches::button_led_task(btn_id, btn, led).await;
 }
 
 #[task]
 async fn lcd_task(
-    frames_in: DisplayFrameChReceiver,
-    frames_out: DisplayFrameChSender,
+    frames_in: display::DisplayFrameChReceiver,
+    frames_out: display::DisplayFrameChSender,
     spi: Spi<'static, Usart0>,
     cs: Pin<'D', 14, OutPp>,
     disp_com_inv: Pin<'D', 13, OutPp>,
 ) {
-    defmt::info!("Starting SPI task...");
+    info!("Starting SPI task...");
     display::ls013b7dh03::lcd_task(frames_in, frames_out, spi, cs, disp_com_inv).await;
 }
 
 #[task]
-async fn display_task(frames_in: DisplayFrameChReceiver, frames_out: DisplayFrameChSender) {
-    defmt::info!("Starting Display task...");
+async fn display_task(
+    frames_in: display::DisplayFrameChReceiver,
+    frames_out: display::DisplayFrameChSender,
+) {
+    info!("Starting Display task...");
     display::display_task(frames_in, frames_out).await;
 }

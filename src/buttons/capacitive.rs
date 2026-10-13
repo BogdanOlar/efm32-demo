@@ -6,7 +6,7 @@ use efm32xg_hal::{
     prs,
     timer::{self, Timer},
 };
-use embassy_time::Timer as EmbTimer;
+use embassy_time::{Instant, Timer as EmbTimer};
 
 pub async fn capacitive_task(
     p_timer0: efm32xg_hal::Peri<'static, efm32xg_hal::peripherals::Timer0>,
@@ -102,6 +102,9 @@ pub async fn capacitive_task(
     let mut threshold: [u16; ACMP_CHANNEL_COUNT] = Default::default();
     let mut touch: [bool; ACMP_CHANNEL_COUNT] = Default::default();
 
+    let n1 = Instant::now();
+    let n2 = Instant::now();
+    let d = n2 - n1;
     loop {
         // Enable ACMP for the entire measurement cycle
         acmp.set_enabled(true);

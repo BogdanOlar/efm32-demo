@@ -2,8 +2,11 @@
 
 pub mod ls013b7dh03;
 
-use crate::{DisplayFrameChReceiver, DisplayFrameChSender};
 use defmt::error;
+use embassy_sync::{
+    blocking_mutex::raw::ThreadModeRawMutex,
+    channel::{Channel, Receiver, Sender},
+};
 use embassy_time::Instant;
 use embedded_graphics::{
     draw_target::DrawTarget,
@@ -15,6 +18,29 @@ use embedded_graphics::{
     Drawable,
 };
 use heapless::format;
+
+const MAX_DISPLAY_BUFFER_COUNT: usize = 2;
+
+pub(crate) type DisplayFrameCh = Channel<
+    ThreadModeRawMutex,
+    DisplayFrame<'static, { ls013b7dh03::BUF_SIZE }>,
+    MAX_DISPLAY_BUFFER_COUNT,
+>;
+pub(crate) type DisplayFrameChReceiver = Receiver<
+    'static,
+    ThreadModeRawMutex,
+    DisplayFrame<'static, { ls013b7dh03::BUF_SIZE }>,
+    MAX_DISPLAY_BUFFER_COUNT,
+>;
+pub(crate) type DisplayFrameChSender = Sender<
+    'static,
+    ThreadModeRawMutex,
+    DisplayFrame<'static, { ls013b7dh03::BUF_SIZE }>,
+    MAX_DISPLAY_BUFFER_COUNT,
+>;
+
+pub(crate) static TO_SPI: DisplayFrameCh = Channel::new();
+pub(crate) static FROM_SPI: DisplayFrameCh = Channel::new();
 
 /// Generic display frame, parametrized over the size of the undelying `u8` buffer (`N: usize`)
 pub struct DisplayFrame<'a, const N: usize> {
