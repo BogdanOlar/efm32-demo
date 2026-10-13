@@ -168,13 +168,13 @@ async fn capacitive_task(
 
     // Configure TIMER0 as measurement window timer
     // HFPERCLK = 40MHz, prescaler = Div512, so timer clock = 40MHz / 512 = 78125 Hz
-    // TOP = 10, so measurement window = (10+1) / 78125 = 140.8us
+    // TOP = 100, so measurement window = (100+1) / 78125 = 1.292ms
     let mut window_timer = Timer::new(
         p_timer0,
-        timer::Config {
+        &timer::Config {
             clock: timer::Clksel::Preschfperclk,
             presc: timer::Presc::Div512,
-            top: 10,
+            top: 100,
             interrupts: timer::InterruptConfig {
                 flags: timer::Interrupts::new(timer::Interrupt::Overflow),
                 ..Default::default()
@@ -186,7 +186,7 @@ async fn capacitive_task(
     // Configure TIMER1 to count ACMP pulses via CC1+PRS, and synchronize Start/Stop to Timer0 Start/Stop
     let mut count_timer = Timer::new(
         p_timer1,
-        timer::Config {
+        &timer::Config {
             // synchronize the start&stop to Timer0 start&stop
             synchronized: true,
             // Clock source is CC1 (PRS pulses from ACMP)
@@ -208,8 +208,9 @@ async fn capacitive_task(
     // Configure ACMP0 for CAPACITIVE SENSE MODE
     let mut acmp = Acmp::new(
         p_acmp,
-        acmp::Config {
-            bias_prog: acmp::BiasProg::try_from_u8(0x20).unwrap(),
+        &acmp::Config {
+            full_bias: true,
+            bias_prog: acmp::BiasProg::MAX,
             accuracy: acmp::Accuracy::High,
             hist_0: acmp::Hysteresis {
                 div_va: acmp::DivV::try_from_u8(0x30).unwrap(),
@@ -238,7 +239,7 @@ async fn capacitive_task(
         acmp::InputSelect::Aport4XCh27,
         acmp::InputSelect::Aport3XCh28,
     ];
-    let mut count: [_; ACMP_CHANNEL_COUNT] = Default::default();
+    let mut count: [u16; ACMP_CHANNEL_COUNT] = Default::default();
     // Track maximum counts for calibration
     let mut max_count: [u16; ACMP_CHANNEL_COUNT] = Default::default();
     let mut threshold: [u16; ACMP_CHANNEL_COUNT] = Default::default();
@@ -247,11 +248,12 @@ async fn capacitive_task(
     loop {
         // Enable ACMP for the entire measurement cycle
         acmp.set_enabled(true);
+        // Brief settle after channel switch
+        EmbTimer::after_micros(200).await;
 
         for (index, acmp_channel) in acmp_channels.iter().enumerate() {
             acmp.set_input_pos(*acmp_channel);
-            // Brief settle after channel switch
-            EmbTimer::after_micros(200).await;
+
             // Reset timers
             window_timer.set_count(0);
             count_timer.set_count(0);
