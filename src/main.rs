@@ -82,6 +82,7 @@ async fn main(spawner: Spawner) {
         NVIC::unmask(Interrupt::GPIO_EVEN);
         NVIC::unmask(Interrupt::GPIO_ODD);
         NVIC::unmask(Interrupt::TIMER0);
+        NVIC::unmask(Interrupt::ACMP0);
     }
 
     // Let this App take control of display (this is a `UG154: EFM32 Pearl Gecko Starter Kit` paticularity)
@@ -230,6 +231,11 @@ async fn capacitive_task(
                 neg_sel: acmp::InputSelect::VaDiv,
                 ..Default::default()
             },
+            interrupts: acmp::InteruptsConfig {
+                warmup: true,
+                conflict: true,
+                ..Default::default()
+            },
             ..Default::default()
         },
     );
@@ -248,8 +254,9 @@ async fn capacitive_task(
     loop {
         // Enable ACMP for the entire measurement cycle
         acmp.set_enabled(true);
-        // Brief settle after channel switch
-        EmbTimer::after_micros(200).await;
+        // wait for warmup (finished) interrupt
+        let ints = acmp.interrupts().await;
+        assert!(ints.is_set(acmp::Interrupt::Warmup));
 
         for (index, acmp_channel) in acmp_channels.iter().enumerate() {
             acmp.set_input_pos(*acmp_channel);
