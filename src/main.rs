@@ -5,20 +5,18 @@ mod buttons;
 mod display;
 
 use cortex_m::peripheral::NVIC;
-use defmt::info;
 use defmt_rtt as _;
 use efm32xg_hal::{
     cmu::{Cmu, HfClockPrescaler, HfClockSource, LfClockSource},
     dma::Dma,
-    gpio::{dynamic::DynamicPin, efemb::AsyncInputPin, Analog, OutPp, Pin},
+    gpio::{Analog, OutPp},
     pac::Interrupt,
-    peripherals::Usart0,
     prelude::*,
-    prs::{self, Prs},
+    prs::Prs,
     timer_le::efemb::Ticker,
     usart::spi::{BitOrder, Config, SpiParts},
 };
-use embassy_executor::{task, Spawner};
+use embassy_executor::Spawner;
 use embedded_hal::spi::MODE_0;
 use panic_probe as _;
 
@@ -52,46 +50,42 @@ async fn main(spawner: Spawner) {
     let _ = gpio.pb11.into_mode::<Analog>();
     let _ = gpio.pb12.into_mode::<Analog>();
 
+    // ---- Buttons Task ----
+    spawner.spawn(buttons::task().expect("Could not spawn buttons::task"));
+
     // ---- Capacitive buttons Task ----
     spawner.spawn(
-        capacitive_task(p.Timer0, p.Timer1, p.Acmp0, prs_channels.ch0)
+        buttons::capacitive::task(p.Timer0, p.Timer1, p.Acmp0, prs_channels.ch0)
             .expect("Could not spawn Capacitive Task"),
     );
 
-    // Add `DisplayFrame`s to the display task queue
-    for f in display::ls013b7dh03::take_display_frames() {
-        display::FROM_SPI.sender().send(f).await;
-    }
-
     // ---- LED 0 and Button 0 Task ----
     spawner.spawn(
-        button_led_task(
+        buttons::switches::task(
             buttons::ButtonId::Btn0,
             gpio.pf6
                 .into_mode::<InFloat>()
                 .into_async_input(gpio.exti4ctrl),
             gpio.pf4.into_mode::<OutPp>().into_dynamic_pin(),
         )
-        .expect("Could not spawn Task 0"),
+        .expect("Could not spawn buttons::switches::task 0"),
     );
 
     // ---- LED 1 and Button 1 Task ----
     spawner.spawn(
-        button_led_task(
+        buttons::switches::task(
             buttons::ButtonId::Btn1,
             gpio.pf7
                 .into_mode::<InFilt>()
                 .into_async_input(gpio.exti5ctrl),
             gpio.pf5.into_mode::<OutPpAlt>().into_dynamic_pin(),
         )
-        .expect("Could not spawn Task 1"),
+        .expect("Could not spawn buttons::switches::task 1"),
     );
 
     // ---- LCD SPI Task ----
     spawner.spawn(
-        lcd_task(
-            display::TO_SPI.receiver(),
-            display::FROM_SPI.sender(),
+        display::ls013b7dh03::task(
             Spi::new(
                 SpiParts::new(
                     p.Usart0,
@@ -110,46 +104,5 @@ async fn main(spawner: Spawner) {
     );
 
     // ---- Display Task ----
-    spawner.spawn(
-        display_task(display::FROM_SPI.receiver(), display::TO_SPI.sender())
-            .expect("Could not spawn Display task"),
-    );
-}
-
-#[task]
-async fn capacitive_task(
-    p_timer0: efm32xg_hal::Peri<'static, efm32xg_hal::peripherals::Timer0>,
-    p_timer1: efm32xg_hal::Peri<'static, efm32xg_hal::peripherals::Timer1>,
-    p_acmp: efm32xg_hal::Peri<'static, efm32xg_hal::peripherals::Acmp0>,
-    prs_ch0: prs::Channel<0>,
-) {
-    info!("Starting Capacitive Touch task...");
-    buttons::capacitive::capacitive_task(p_timer0, p_timer1, p_acmp, prs_ch0).await
-}
-
-#[task(pool_size = 2)]
-async fn button_led_task(btn_id: buttons::ButtonId, btn: AsyncInputPin, led: DynamicPin) {
-    info!("Starting Button {} task...", &btn_id);
-    buttons::switches::button_led_task(btn_id, btn, led).await;
-}
-
-#[task]
-async fn lcd_task(
-    frames_in: display::DisplayFrameChReceiver,
-    frames_out: display::DisplayFrameChSender,
-    spi: Spi<'static, Usart0>,
-    cs: Pin<'D', 14, OutPp>,
-    disp_com_inv: Pin<'D', 13, OutPp>,
-) {
-    info!("Starting SPI task...");
-    display::ls013b7dh03::lcd_task(frames_in, frames_out, spi, cs, disp_com_inv).await;
-}
-
-#[task]
-async fn display_task(
-    frames_in: display::DisplayFrameChReceiver,
-    frames_out: display::DisplayFrameChSender,
-) {
-    info!("Starting Display task...");
-    display::display_task(frames_in, frames_out).await;
+    spawner.spawn(display::task().expect("Could not spawn Display task"));
 }

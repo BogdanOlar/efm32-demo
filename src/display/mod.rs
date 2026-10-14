@@ -2,11 +2,9 @@
 
 pub mod ls013b7dh03;
 
-use defmt::error;
-use embassy_sync::{
-    blocking_mutex::raw::ThreadModeRawMutex,
-    channel::{Channel, Receiver, Sender},
-};
+use defmt::{error, info};
+use embassy_executor::task;
+use embassy_sync::{blocking_mutex::raw::ThreadModeRawMutex, channel::Channel};
 use embassy_time::Instant;
 use embedded_graphics::{
     draw_target::DrawTarget,
@@ -22,18 +20,6 @@ use heapless::format;
 const MAX_DISPLAY_BUFFER_COUNT: usize = 2;
 
 pub(crate) type DisplayFrameCh = Channel<
-    ThreadModeRawMutex,
-    DisplayFrame<'static, { ls013b7dh03::BUF_SIZE }>,
-    MAX_DISPLAY_BUFFER_COUNT,
->;
-pub(crate) type DisplayFrameChReceiver = Receiver<
-    'static,
-    ThreadModeRawMutex,
-    DisplayFrame<'static, { ls013b7dh03::BUF_SIZE }>,
-    MAX_DISPLAY_BUFFER_COUNT,
->;
-pub(crate) type DisplayFrameChSender = Sender<
-    'static,
     ThreadModeRawMutex,
     DisplayFrame<'static, { ls013b7dh03::BUF_SIZE }>,
     MAX_DISPLAY_BUFFER_COUNT,
@@ -60,7 +46,12 @@ impl<'a, const N: usize> DisplayFrame<'a, N> {
     }
 }
 
-pub async fn display_task(frames_in: DisplayFrameChReceiver, frames_out: DisplayFrameChSender) {
+#[task]
+pub async fn task() {
+    info!("Started display::task ...");
+    let frames_in = FROM_SPI.receiver();
+    let frames_out = TO_SPI.sender();
+
     // Create styles used by the drawing operations.
     let thin_stroke = PrimitiveStyle::with_stroke(BinaryColor::On, 1);
     let border_stroke = PrimitiveStyleBuilder::new()

@@ -1,19 +1,25 @@
 //! Buttons using capacitive pads
 
-use defmt::info;
+use crate::buttons::{Action, ButtonId, Event, BUTTON_EVENTS_CHANNEL};
+use defmt::{info, warn};
 use efm32xg_hal::{
     acmp::{self, Acmp},
     prs,
     timer::{self, Timer},
 };
+use embassy_executor::task;
 use embassy_time::{Instant, Timer as EmbTimer};
 
-pub async fn capacitive_task(
+#[task]
+pub async fn task(
     p_timer0: efm32xg_hal::Peri<'static, efm32xg_hal::peripherals::Timer0>,
     p_timer1: efm32xg_hal::Peri<'static, efm32xg_hal::peripherals::Timer1>,
     p_acmp: efm32xg_hal::Peri<'static, efm32xg_hal::peripherals::Acmp0>,
     mut prs_ch0: prs::Channel<0>,
 ) {
+    info!("Started buttons::capacitive::task...");
+    let events = BUTTON_EVENTS_CHANNEL.sender();
+
     // Configure PRS channel 0 to detect ACMP0 output edges
     prs_ch0.set_source(prs::ChSource::Acmp0);
     prs_ch0.set_edge(prs::ChCtrlEdsel::Posedge);
@@ -26,7 +32,7 @@ pub async fn capacitive_task(
         &timer::Config {
             clock: timer::Clksel::Preschfperclk,
             presc: timer::Presc::Div512,
-            top: 100,
+            top: 10,
             interrupts: timer::InterruptConfig {
                 flags: timer::Interrupts::new(timer::Interrupt::Overflow),
                 ..Default::default()
@@ -93,21 +99,20 @@ pub async fn capacitive_task(
 
     const ACMP_CHANNEL_COUNT: usize = 2;
     let acmp_channels: [acmp::InputSelect; ACMP_CHANNEL_COUNT] = [
-        acmp::InputSelect::Aport4XCh27,
         acmp::InputSelect::Aport3XCh28,
+        acmp::InputSelect::Aport4XCh27,
     ];
     let mut count: [u16; ACMP_CHANNEL_COUNT] = Default::default();
     // Track maximum counts for calibration
     let mut max_count: [u16; ACMP_CHANNEL_COUNT] = Default::default();
     let mut threshold: [u16; ACMP_CHANNEL_COUNT] = Default::default();
-    let mut touch: [bool; ACMP_CHANNEL_COUNT] = Default::default();
+    // Set initial touch to true so that we sent the expected `Released` event after first read
+    let mut touch: [bool; ACMP_CHANNEL_COUNT] = [true; _];
 
-    let n1 = Instant::now();
-    let n2 = Instant::now();
-    let d = n2 - n1;
     loop {
         // Enable ACMP for the entire measurement cycle
         acmp.set_enabled(true);
+
         // wait for warmup (finished) interrupt
         let ints = acmp.interrupts().await;
         assert!(ints.is_set(acmp::Interrupt::Warmup));
@@ -124,6 +129,12 @@ pub async fn capacitive_task(
             window_timer.interrupt().await;
             window_timer.stop();
 
+            // DEBUG
+            let wt_count = window_timer.count();
+            if wt_count > 0 {
+                warn!("{} count: {}", index, wt_count);
+            }
+
             count[index] = count_timer.count();
 
             // Update maximum for calibration
@@ -131,22 +142,50 @@ pub async fn capacitive_task(
             // Simple touch detection: count drops below 75% of maximum (25% below = touched)
             threshold[index] = max_count[index].saturating_sub(max_count[index] / 4);
             // Calculate pressed state
-            touch[index] = count[index] < threshold[index] && max_count[index] > 0;
+            let touched = count[index] < threshold[index] && max_count[index] > 0;
+
+            // pad changed state
+            if touched != touch[index] {
+                touch[index] = touched;
+
+                let id = if index == 0 {
+                    ButtonId::Cap0
+                } else {
+                    ButtonId::Cap1
+                };
+
+                let action = if touched {
+                    Action::Pressed
+                } else {
+                    Action::Released
+                };
+
+                if events
+                    .try_send(Event {
+                        ts: Instant::now(),
+                        id,
+                        action,
+                    })
+                    .is_err()
+                {
+                    warn!("Failed to send {} {}", id, action);
+                }
+            }
         }
 
         acmp.set_enabled(false);
 
-        info!(
-            "PB11={} ({}) PB12={} ({}) | Max: {} {} | T: {} {}",
-            count[0],
-            threshold[0],
-            count[1],
-            threshold[1],
-            max_count[0],
-            max_count[1],
-            touch[0],
-            touch[1]
-        );
+        // info!(
+        //     "PB11={} ({}) PB12={} ({}) | Max: {} {} | T: {} {}",
+        //     count[0],
+        //     threshold[0],
+        //     count[1],
+        //     threshold[1],
+        //     max_count[0],
+        //     max_count[1],
+        //     touch[0],
+        //     touch[1]
+        // );
 
         EmbTimer::after_millis(50).await;
     }

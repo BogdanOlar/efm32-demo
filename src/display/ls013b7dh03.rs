@@ -1,15 +1,17 @@
 //! LS013B7DH03 display
 
-use crate::display::{DisplayFrame, DisplayFrameChReceiver, DisplayFrameChSender};
+use crate::display::DisplayFrame;
 use core::{
     cell::UnsafeCell,
     sync::atomic::{AtomicBool, Ordering},
 };
+use defmt::info;
 use efm32xg_hal::{
     gpio::{OutPp, Pin},
     peripherals::Usart0,
     usart::spi::dma::Spi,
 };
+use embassy_executor::task;
 use embedded_graphics::{
     draw_target::DrawTarget,
     geometry::{Dimensions, Point, Size},
@@ -167,13 +169,22 @@ impl<'a> DrawTarget for DisplayFrame<'a, BUF_SIZE> {
 }
 
 /// Send frames to the LS013B7DH03 LCD
-pub async fn lcd_task(
-    frames_in: DisplayFrameChReceiver,
-    frames_out: DisplayFrameChSender,
+#[task]
+pub async fn task(
     mut spi: Spi<'static, Usart0>,
     mut cs: Pin<'D', 14, OutPp>,
     _disp_com_inv: Pin<'D', 13, OutPp>,
 ) {
+    info!("Started display::ls013b7dh03::task ...");
+
+    let frames_in = crate::display::TO_SPI.receiver();
+    let frames_out = crate::display::FROM_SPI.sender();
+
+    // Add `DisplayFrame`s to the display task queue
+    for f in take_display_frames() {
+        frames_out.send(f).await;
+    }
+
     /// LCD Mode flags
     #[repr(u8)]
     enum LcdMode {
