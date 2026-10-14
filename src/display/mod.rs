@@ -2,6 +2,7 @@
 
 pub mod ls013b7dh03;
 
+use crate::buttons;
 use defmt::{error, info};
 use embassy_executor::task;
 use embassy_sync::{blocking_mutex::raw::ThreadModeRawMutex, channel::Channel};
@@ -69,11 +70,45 @@ pub async fn task() {
     let sec_us: f32 = 1000000.0;
     let mut prev_frame_start = Instant::now();
 
+    let mut x_offset = 100;
+    const T_WIDTH: i32 = 16;
+    const T_HEIGHT: i32 = 16;
+
     loop {
         let mut frame = frames_in.receive().await;
         let frame_start = Instant::now();
         let frame_us = (frame_start - prev_frame_start).as_micros() as f32;
         prev_frame_start = frame_start;
+
+        let x_dir = {
+            // buttons state lock will be dropped a the end of this scope
+            let bs = buttons::BUTTON_STATES.lock().await;
+
+            if bs.cap1.action == buttons::Action::Pressed
+                && bs.cap0.action == buttons::Action::Pressed
+            {
+                if bs.cap1.ts > bs.cap0.ts {
+                    -1
+                } else {
+                    1
+                }
+            } else if bs.cap1.action == buttons::Action::Pressed {
+                -1
+            } else if bs.cap0.action == buttons::Action::Pressed {
+                1
+            } else {
+                0
+            }
+        };
+
+        x_offset += x_dir;
+        x_offset = x_offset.clamp(0, ls013b7dh03::WIDTH as i32);
+
+        y_offset = if y_offset <= -16 {
+            ls013b7dh03::HEIGHT as i32
+        } else {
+            y_offset - 1
+        };
 
         frame.clear(BinaryColor::Off);
 
@@ -85,17 +120,12 @@ pub async fn task() {
 
         // Draw a triangle.
         Triangle::new(
-            Point::new(100, 16 + y_offset),
-            Point::new(100 + 16, 16 + y_offset),
-            Point::new(100 + 8, y_offset),
+            Point::new(x_offset, y_offset),
+            Point::new(x_offset - (T_WIDTH / 2), y_offset + T_HEIGHT),
+            Point::new(x_offset + (T_WIDTH / 2), y_offset + T_HEIGHT),
         )
         .into_styled(thin_stroke)
         .draw(&mut frame);
-        y_offset = if y_offset <= -16 {
-            ls013b7dh03::HEIGHT as i32
-        } else {
-            y_offset - 1
-        };
 
         // FPS
         let fps = if frame_us.is_normal() {

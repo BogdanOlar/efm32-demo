@@ -1,6 +1,6 @@
 //! Buttons using capacitive pads
 
-use crate::buttons::{Action, ButtonId, Event, BUTTON_EVENTS_CHANNEL};
+use crate::buttons::{Event, State, BUTTON_EVENTS_CHANNEL};
 use defmt::{info, warn};
 use efm32xg_hal::{
     acmp::{self, Acmp},
@@ -26,12 +26,13 @@ pub async fn task(
 
     // Configure TIMER0 as measurement window timer
     // HFPERCLK = 40MHz, prescaler = Div512, so timer clock = 40MHz / 512 = 78125 Hz
-    // TOP = 100, so measurement window = (100+1) / 78125 = 1.292ms
+    // TOP = 10, so measurement window = (10+1) / 78125 = 140us
     let mut window_timer = Timer::new(
         p_timer0,
         &timer::Config {
             clock: timer::Clksel::Preschfperclk,
             presc: timer::Presc::Div512,
+            one_shot: true,
             top: 10,
             interrupts: timer::InterruptConfig {
                 flags: timer::Interrupts::new(timer::Interrupt::Overflow),
@@ -126,8 +127,10 @@ pub async fn task(
 
             // Start measurement - count_timer starts&stops automatically via SYNC
             window_timer.start();
-            window_timer.interrupt().await;
+            let iflags = window_timer.interrupt().await;
             window_timer.stop();
+            const OVF: timer::Interrupts = timer::Interrupts::new(timer::Interrupt::Overflow);
+            assert!(iflags.as_inner() == OVF.as_inner());
 
             // DEBUG
             let wt_count = window_timer.count();
@@ -148,27 +151,20 @@ pub async fn task(
             if touched != touch[index] {
                 touch[index] = touched;
 
-                let id = if index == 0 {
-                    ButtonId::Cap0
-                } else {
-                    ButtonId::Cap1
-                };
-
-                let action = if touched {
-                    Action::Pressed
-                } else {
-                    Action::Released
-                };
-
-                if events
-                    .try_send(Event {
+                let event = if index == 0 {
+                    Event::Cap0(State {
                         ts: Instant::now(),
-                        id,
-                        action,
+                        action: touched.into(),
                     })
-                    .is_err()
-                {
-                    warn!("Failed to send {} {}", id, action);
+                } else {
+                    Event::Cap1(State {
+                        ts: Instant::now(),
+                        action: touched.into(),
+                    })
+                };
+
+                if events.try_send(event).is_err() {
+                    warn!("Failed to send {}", &event);
                 }
             }
         }

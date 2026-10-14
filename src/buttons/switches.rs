@@ -1,6 +1,6 @@
 //! Buttons usin HW switches
 
-use crate::buttons::{Action, ButtonId, Event, BUTTON_EVENTS_CHANNEL};
+use crate::buttons::{Action, ButtonId, Event, State, BUTTON_EVENTS_CHANNEL};
 use defmt::{info, warn};
 use efm32xg_hal::gpio::{dynamic::DynamicPin, efemb::AsyncInputPin};
 use embassy_executor::task;
@@ -16,16 +16,17 @@ pub async fn task(id: ButtonId, mut btn: AsyncInputPin, mut led: DynamicPin) {
         // Wait for button press (active low)
         let _ = btn.wait_for_low().await;
         let _ = led.set_high();
-        let action = Action::Pressed;
-        if events
-            .try_send(Event {
-                ts: Instant::now(),
-                id,
-                action,
-            })
-            .is_err()
-        {
-            warn!("Failed to send {} {}", id, action);
+
+        let state = State {
+            ts: Instant::now(),
+            action: Action::Pressed,
+        };
+        let event = match id {
+            ButtonId::Btn0 => Event::Btn0(state),
+            ButtonId::Btn1 => Event::Btn1(state),
+        };
+        if events.try_send(event).is_err() {
+            warn!("Failed to send {}", &event);
         }
 
         // Small delay to debounce
@@ -34,16 +35,16 @@ pub async fn task(id: ButtonId, mut btn: AsyncInputPin, mut led: DynamicPin) {
         // Wait for button release
         let _ = btn.wait_for_high().await;
         let _ = led.set_low();
-        let action = Action::Released;
-        if events
-            .try_send(Event {
-                ts: Instant::now(),
-                id,
-                action,
-            })
-            .is_err()
-        {
-            warn!("Failed to send {} {}", id, action);
+        let state = State {
+            ts: Instant::now(),
+            action: Action::Released,
+        };
+        let event = match id {
+            ButtonId::Btn0 => Event::Btn0(state),
+            ButtonId::Btn1 => Event::Btn1(state),
+        };
+        if events.try_send(event).is_err() {
+            warn!("Failed to send {}", &event);
         }
 
         // Small delay to debounce
