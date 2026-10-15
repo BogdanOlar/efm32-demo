@@ -82,6 +82,7 @@ pub async fn task(
                 ..Default::default()
             },
             input_sel: acmp::InputSelection {
+                // Enable capacitive sense (relaxed RC oscillator), with given resistor value
                 cs_res_sel: Some(acmp::CsResSel::Res7),
                 va_sel: acmp::VaSel::Vdd,
                 vb_sel: acmp::VbSel::V1p25,
@@ -106,9 +107,12 @@ pub async fn task(
     let mut count: [u16; ACMP_CHANNEL_COUNT] = Default::default();
     // Track maximum counts for calibration
     let mut max_count: [u16; ACMP_CHANNEL_COUNT] = Default::default();
-    let mut threshold: [u16; ACMP_CHANNEL_COUNT] = Default::default();
     // Set initial touch to true so that we sent the expected `Released` event after first read
     let mut touch: [bool; ACMP_CHANNEL_COUNT] = [true; _];
+
+    // DEBUG: some expected interrrupt flags
+    const A_WARMUP: acmp::Interrupts = acmp::Interrupts::new(acmp::Interrupt::Warmup);
+    const T_OVF: timer::Interrupts = timer::Interrupts::new(timer::Interrupt::Overflow);
 
     loop {
         // Enable ACMP for the entire measurement cycle
@@ -116,10 +120,13 @@ pub async fn task(
 
         // wait for warmup (finished) interrupt
         let ints = acmp.interrupts().await;
-        assert!(ints.is_set(acmp::Interrupt::Warmup));
+        // Only Warmup flag was raised
+        assert!(ints == A_WARMUP);
 
         for (index, acmp_channel) in acmp_channels.iter().enumerate() {
             acmp.set_input_pos(*acmp_channel);
+            // No channel conflict expected
+            assert!(!acmp.get_interrupt(acmp::Interrupt::Conflict));
 
             // Reset timers
             window_timer.set_count(0);
@@ -129,10 +136,10 @@ pub async fn task(
             window_timer.start();
             let iflags = window_timer.interrupt().await;
             window_timer.stop();
-            const OVF: timer::Interrupts = timer::Interrupts::new(timer::Interrupt::Overflow);
-            assert!(iflags.as_inner() == OVF.as_inner());
+            // Only Overflow flag was raised
+            assert!(iflags == T_OVF);
 
-            // DEBUG
+            // DEBUG: window_timer count should be 0 after the Overflow interrupt event, i.e. it was stopped
             let wt_count = window_timer.count();
             if wt_count > 0 {
                 warn!("{} count: {}", index, wt_count);
@@ -143,24 +150,23 @@ pub async fn task(
             // Update maximum for calibration
             max_count[index] = max_count[index].max(count[index]);
             // Simple touch detection: count drops below 75% of maximum (25% below = touched)
-            threshold[index] = max_count[index].saturating_sub(max_count[index] / 4);
+            let threshold = max_count[index].saturating_sub(max_count[index] / 4);
             // Calculate pressed state
-            let touched = count[index] < threshold[index] && max_count[index] > 0;
+            let touched = count[index] < threshold;
 
             // pad changed state
             if touched != touch[index] {
                 touch[index] = touched;
 
+                let state = State {
+                    ts: Instant::now(),
+                    action: touched.into(),
+                };
+
                 let event = if index == 0 {
-                    Event::Cap0(State {
-                        ts: Instant::now(),
-                        action: touched.into(),
-                    })
+                    Event::Cap0(state)
                 } else {
-                    Event::Cap1(State {
-                        ts: Instant::now(),
-                        action: touched.into(),
-                    })
+                    Event::Cap1(state)
                 };
 
                 if events.try_send(event).is_err() {
@@ -171,18 +177,6 @@ pub async fn task(
 
         acmp.set_enabled(false);
 
-        // info!(
-        //     "PB11={} ({}) PB12={} ({}) | Max: {} {} | T: {} {}",
-        //     count[0],
-        //     threshold[0],
-        //     count[1],
-        //     threshold[1],
-        //     max_count[0],
-        //     max_count[1],
-        //     touch[0],
-        //     touch[1]
-        // );
-
-        EmbTimer::after_millis(50).await;
+        EmbTimer::after_millis(10).await;
     }
 }
