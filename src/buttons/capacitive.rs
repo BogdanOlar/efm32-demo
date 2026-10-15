@@ -2,7 +2,7 @@
 
 use crate::buttons::{Event, State, BUTTON_EVENTS_CHANNEL};
 use defmt::{info, warn};
-use efm32xg_hal::{
+use efm32_hal::{
     acmp::{self, Acmp},
     prs,
     timer::{self, Timer},
@@ -12,9 +12,9 @@ use embassy_time::{Instant, Timer as EmbTimer};
 
 #[task]
 pub async fn task(
-    p_timer0: efm32xg_hal::Peri<'static, efm32xg_hal::peripherals::Timer0>,
-    p_timer1: efm32xg_hal::Peri<'static, efm32xg_hal::peripherals::Timer1>,
-    p_acmp: efm32xg_hal::Peri<'static, efm32xg_hal::peripherals::Acmp0>,
+    p_timer0: efm32_hal::Peri<'static, efm32_hal::peripherals::Timer0>,
+    p_timer1: efm32_hal::Peri<'static, efm32_hal::peripherals::Timer1>,
+    p_acmp: efm32_hal::Peri<'static, efm32_hal::peripherals::Acmp0>,
     mut prs_ch0: prs::Channel<0>,
 ) {
     info!("Started buttons::capacitive::task...");

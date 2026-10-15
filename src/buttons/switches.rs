@@ -2,7 +2,7 @@
 
 use crate::buttons::{Action, ButtonId, Event, State, BUTTON_EVENTS_CHANNEL};
 use defmt::{info, warn};
-use efm32xg_hal::gpio::{dynamic::DynamicPin, efemb::AsyncInputPin};
+use efm32_hal::gpio::{dynamic::DynamicPin, efemb::AsyncInputPin};
 use embassy_executor::task;
 use embassy_time::{Instant, Timer};
 use embedded_hal::digital::OutputPin;

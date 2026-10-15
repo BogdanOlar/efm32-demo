@@ -1,12 +1,12 @@
 [package]
-name = "efm32xg-demo"
+name = "efm32-demo"
 version = "0.1.0"
 edition = "2021"
-description = "Demo binary using efm32xg-hal"
+description = "Demo binary using efm32-hal"
 
 [dependencies]
 # Local path to the HAL crate
-efm32xg-hal = { path = "../efm32xg-hal", features = ["defmt", "qfn48", "efemb", "efemb-timdrv-letim0-hz-32_768"] }
+efm32-hal = { path = "../efm32-hal", features = ["defmt", "qfn48", "efemb", "efemb-timdrv-letim0-hz-32_768"] }
 
 # Embassy for async
 embassy-executor = { version = "0.10", features = ["platform-cortex-m", "executor-thread", "defmt"] }

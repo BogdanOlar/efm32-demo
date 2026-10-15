@@ -232,14 +232,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "efm32xg-demo"
+name = "efm32-demo"
 version = "0.1.0"
 dependencies = [
  "cortex-m",
  "cortex-m-rt",
  "defmt 1.1.1",
  "defmt-rtt",
- "efm32xg-hal",
+ "efm32-hal",
  "embassy-executor",
  "embassy-futures",
  "embassy-sync 0.8.0",
@@ -252,7 +252,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "efm32xg-hal"
+name = "efm32-hal"
 version = "0.1.0"
 dependencies = [
  "cortex-m",
@@ -261,7 +261,7 @@ dependencies = [
  "critical-section",
  "defmt 1.1.1",
  "document-features",
- "efm32xg-pac",
+ "efm32-pac",
  "embassy-futures",
  "embassy-hal-internal",
  "embassy-sync 0.7.2",
@@ -273,7 +273,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "efm32xg-pac"
+name = "efm32-pac"
 version = "0.1.0"
 dependencies = [
  "cortex-m",

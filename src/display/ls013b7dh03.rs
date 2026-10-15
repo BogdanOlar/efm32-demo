@@ -6,7 +6,7 @@ use core::{
     sync::atomic::{AtomicBool, Ordering},
 };
 use defmt::info;
-use efm32xg_hal::{
+use efm32_hal::{
     gpio::{OutPp, Pin},
     peripherals::Usart0,
     usart::spi::dma::Spi,

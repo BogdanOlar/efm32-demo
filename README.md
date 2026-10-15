@@ -1,4 +1,4 @@
-# Playground for testing `efm32xg-hal`
+# Playground for testing `efm32-hal`
 
 Work in progress...
 

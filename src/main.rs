@@ -6,7 +6,7 @@ mod display;
 
 use cortex_m::peripheral::NVIC;
 use defmt_rtt as _;
-use efm32xg_hal::{
+use efm32_hal::{
     cmu::{Cmu, HfClockPrescaler, HfClockSource, LfClockSource},
     dma::Dma,
     gpio::{Analog, OutPp},
@@ -22,7 +22,7 @@ use panic_probe as _;
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
-    let p = efm32xg_hal::init();
+    let p = efm32_hal::init();
 
     // Initialize clocks
     let _clocks = Cmu::new(p.Cmu)
