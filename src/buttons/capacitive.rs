@@ -99,16 +99,10 @@ pub async fn task(
         },
     );
 
-    const ACMP_CHANNEL_COUNT: usize = 2;
-    let acmp_channels: [acmp::InputSelect; ACMP_CHANNEL_COUNT] = [
-        acmp::InputSelect::Aport3XCh28,
-        acmp::InputSelect::Aport4XCh27,
+    let mut pads: [PadState; _] = [
+        PadState::new(acmp::InputSelect::Aport3XCh28),
+        PadState::new(acmp::InputSelect::Aport4XCh27),
     ];
-    let mut count: [u16; ACMP_CHANNEL_COUNT] = Default::default();
-    // Track maximum counts for calibration
-    let mut max_count: [u16; ACMP_CHANNEL_COUNT] = Default::default();
-    // Set initial touch to true so that we sent the expected `Released` event after first read
-    let mut touch: [bool; ACMP_CHANNEL_COUNT] = [true; _];
 
     // DEBUG: some expected interrrupt flags
     const A_WARMUP: acmp::Interrupts = acmp::Interrupts::new(acmp::Interrupt::Warmup);
@@ -123,8 +117,8 @@ pub async fn task(
         // Only Warmup flag was raised
         assert!(ints == A_WARMUP);
 
-        for (index, acmp_channel) in acmp_channels.iter().enumerate() {
-            acmp.set_input_pos(*acmp_channel);
+        for (index, pad) in pads.iter_mut().enumerate() {
+            acmp.set_input_pos(pad.ch);
             // No channel conflict expected
             assert!(!acmp.get_interrupt(acmp::Interrupt::Conflict));
 
@@ -145,23 +139,8 @@ pub async fn task(
                 warn!("{} count: {}", index, wt_count);
             }
 
-            count[index] = count_timer.count();
-
-            // Update maximum for calibration
-            max_count[index] = max_count[index].max(count[index]);
-            // Simple touch detection: count drops below 75% of maximum (25% below = touched)
-            let threshold = max_count[index].saturating_sub(max_count[index] / 4);
-            // Calculate pressed state
-            let touched = count[index] < threshold;
-
-            // pad changed state
-            if touched != touch[index] {
-                touch[index] = touched;
-
-                let state = State {
-                    ts: Instant::now(),
-                    action: touched.into(),
-                };
+            if let Some(state) = pad.set_count(count_timer.count()) {
+                // pad changed state
 
                 let event = if index == 0 {
                     Event::Cap0(state)
@@ -178,5 +157,51 @@ pub async fn task(
         acmp.set_enabled(false);
 
         EmbTimer::after_millis(10).await;
+    }
+}
+
+struct PadState {
+    ch: acmp::InputSelect,
+    count: u16,
+    max_count: u16,
+    state: State,
+}
+
+impl PadState {
+    const fn new(ch: acmp::InputSelect) -> Self {
+        Self {
+            ch,
+            count: 0,
+            max_count: 0,
+            // Set initial touch to true so that we sent the expected `Released` event after first read
+            state: State {
+                ts: Instant::MIN,
+                action: super::Action::Pressed,
+            },
+        }
+    }
+
+    fn set_count(&mut self, count: u16) -> Option<State> {
+        self.count = count;
+        // Update maximum for calibration
+        self.max_count = self.max_count.max(self.count);
+        // Simple touch detection: count drops below 75% of maximum (25% below = touched)
+        let threshold = self.max_count.saturating_sub(self.max_count / 4);
+        // Calculate pressed state
+        let action = if self.count < threshold {
+            super::Action::Pressed
+        } else {
+            super::Action::Released
+        };
+
+        if action != self.state.action {
+            self.state = State {
+                ts: Instant::now(),
+                action,
+            };
+            Some(self.state)
+        } else {
+            None
+        }
     }
 }
