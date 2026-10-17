@@ -142,10 +142,10 @@ pub async fn task(
             if let Some(state) = pad.set_count(count_timer.count()) {
                 // pad changed state
 
-                let event = if index == 0 {
-                    Event::Cap0(state)
-                } else {
-                    Event::Cap1(state)
+                let event = match index {
+                    0 => Event::Cap0(state),
+                    1 => Event::Cap1(state),
+                    _ => unreachable!(),
                 };
 
                 if events.try_send(event).is_err() {
