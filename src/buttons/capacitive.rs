@@ -1,7 +1,7 @@
 //! Buttons using capacitive pads
 
 use crate::buttons::{Event, State, BUTTON_EVENTS_CHANNEL};
-use defmt::{info, warn};
+use defmt::{debug, info, warn};
 use efm32_hal::{
     acmp::{self, Acmp},
     prs,
@@ -151,6 +151,8 @@ pub async fn task(
                 if events.try_send(event).is_err() {
                     warn!("Failed to send {}", &event);
                 }
+
+                debug!("Pad {}: {}", index, pad);
             }
         }
 
@@ -160,6 +162,8 @@ pub async fn task(
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 struct PadState {
     ch: acmp::InputSelect,
     count: u16,
