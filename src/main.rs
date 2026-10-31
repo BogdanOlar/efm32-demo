@@ -7,13 +7,11 @@ mod display;
 use cortex_m::peripheral::NVIC;
 use defmt_rtt as _;
 use efm32_hal::{
-    cmu::{Cmu, HfClockPrescaler, HfClockSource, LfClockSource},
     dma::Dma,
     gpio::{Analog, OutPp},
     pac::Interrupt,
     prelude::*,
     prs::Prs,
-    timer_le::efemb::Ticker,
     usart::spi::{BitOrder, Config, SpiParts},
 };
 use embassy_executor::Spawner;
@@ -22,16 +20,9 @@ use panic_probe as _;
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
+    // Initialize hal
+    // TODO: pass a clocks config to this function
     let p = efm32_hal::init();
-
-    // Initialize clocks
-    let _clocks = Cmu::new(p.Cmu)
-        .with_hf_clk(HfClockSource::HfXO(40_000_000), HfClockPrescaler::Div1)
-        .with_lfa_clk(LfClockSource::LfRco)
-        .freeze();
-
-    // Initialize embassy time driver
-    Ticker::init();
 
     let gpio = Gpio::new(p.Gpio);
     let dma = Dma::init(p.Ldma);
