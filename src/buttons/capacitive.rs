@@ -1,6 +1,6 @@
 //! Buttons using capacitive pads
 
-use crate::buttons::{Event, State, BUTTON_EVENTS_CHANNEL};
+use crate::buttons::{BUTTON_EVENTS_CHANNEL, Event, State};
 use defmt::{debug, info, warn};
 use efm32_hal::{
     acmp::{self, Acmp},
@@ -56,8 +56,8 @@ pub async fn task(
                 timer::CcConfig {
                     mode: timer::CcCtrlMode::Inputcapture,
                     input_sel: timer::CcInputSel::Prs(prs::ChannelId::Ch0),
-                    ic_edge_select: timer::CcCtrlIcedge::Both,
-                    ic_event_control: timer::CcCtrlIcevctrl::Rising,
+                    ic_edge_select: timer::CcCtrlIcEdge::Both,
+                    ic_event_control: timer::CcCtrlIcEvCtrl::Rising,
                 },
             ),
             ..Default::default()
