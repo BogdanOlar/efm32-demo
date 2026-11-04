@@ -123,15 +123,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cortex-m-semihosting"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb6d409db102d77600a714dfa93744e379d9a7e03cbb175d64f09e14d3e921a2"
-dependencies = [
- "critical-section",
-]
-
-[[package]]
 name = "critical-section"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -257,7 +248,6 @@ version = "0.1.0"
 dependencies = [
  "cortex-m",
  "cortex-m-rt",
- "cortex-m-semihosting",
  "critical-section",
  "defmt 1.2.0",
  "document-features",
@@ -269,7 +259,6 @@ dependencies = [
  "embassy-time-queue-utils",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
- "rtt-target",
 ]
 
 [[package]]
@@ -677,18 +666,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
-name = "rtt-target"
-version = "0.6.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e7afed1f4302eeba88c601636cf2c554c45e1cbb464bab44c6012bab0e71473c"
-dependencies = [
- "critical-section",
- "defmt 0.3.100",
- "portable-atomic",
- "ufmt-write",
-]
-
-[[package]]
 name = "rustc_version"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -868,12 +845,6 @@ dependencies = [
  "tracing-core",
  "tracing-log",
 ]
-
-[[package]]
-name = "ufmt-write"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e87a2ed6b42ec5e28cc3b94c09982969e9227600b2e3dcbc1db927a84c06bd69"
 
 [[package]]
 name = "unicode-ident"
