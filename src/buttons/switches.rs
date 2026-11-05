@@ -1,6 +1,6 @@
 //! Buttons usin HW switches
 
-use crate::buttons::{Action, ButtonId, Event, State, BUTTON_EVENTS_CHANNEL};
+use crate::buttons::{Action, BUTTON_EVENTS_CHANNEL, ButtonId, Event, State};
 use defmt::{info, warn};
 use efm32_hal::gpio::{dynamic::DynamicPin, efemb::AsyncInputPin};
 use embassy_executor::task;
@@ -14,7 +14,7 @@ pub async fn task(id: ButtonId, mut btn: AsyncInputPin, mut led: DynamicPin) {
     let events = BUTTON_EVENTS_CHANNEL.sender();
     loop {
         // Wait for button press (active low)
-        let _ = btn.wait_for_low().await;
+        let _ = btn.wait_for_low().await; // FIXME: why doesn't this button also have `is_high()` `is_low()` sync methods?!
         let _ = led.set_high();
 
         let state = State {
